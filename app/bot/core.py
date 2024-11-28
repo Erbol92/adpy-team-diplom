@@ -3,7 +3,7 @@ from config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
-from .any_method import params, map_sex
+from .any_method import params
 from .iterator import UserIterator
 
 # from app.database.models import User, UserCandidate, Candidate
@@ -26,10 +26,10 @@ async def send_start_message(user_id, message):
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('🧲 поиск', color=VkKeyboardColor.NEGATIVE, payload={
         "button": "search",
-        "label":"🧲 поиск",})
+        "label": "🧲 поиск", })
     keyboard.add_callback_button('🌏 указать место', color=VkKeyboardColor.POSITIVE, payload={
         "button": "geo",
-        "label":"🌏 указать место",})
+        "label": "🌏 указать место", })
     param = params(user_id, message, keyboard)
     try:
         vk.messages.send(**param)
@@ -58,12 +58,12 @@ def get_photos(user_id: int):
 async def send_choose_message(user_id: int, message: str, candidate_id: int):
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('💔', color=VkKeyboardColor.NEGATIVE, payload={
-        "button": "dislike", "id": candidate_id,"label": '💔'})
+        "button": "dislike", "id": candidate_id, "label": '💔'})
     keyboard.add_callback_button('❤', color=VkKeyboardColor.POSITIVE, payload={
-        "button": "like", "id": candidate_id,"label": '❤'})
+        "button": "like", "id": candidate_id, "label": '❤'})
     keyboard.add_line()
     keyboard.add_callback_button('следующий(ая)', color=VkKeyboardColor.PRIMARY,
-                                 payload={"button": "next", "id": candidate_id,"label": '👉'})
+                                 payload={"button": "next", "id": candidate_id, "label": '👉'})
     param = params(user_id, message, keyboard, get_photos(candidate_id))
     try:
         vk.messages.send(**param)
@@ -159,6 +159,7 @@ async def search(user_id: int, home_town: str = None):
     return text
 
 
+# проверяем есть ли у пользователя др и пол
 async def check_and_send(your_id: int, event):
     sex = user_profile[your_id].get('sex')
     bdate = user_profile[your_id].get('bdate')
@@ -171,7 +172,9 @@ async def check_and_send(your_id: int, event):
             try:
                 if user_profile[your_id].get('candidate'):
                     user = next(user_iterators[your_id])
-                    await send_choose_message(your_id, f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}", user['id'])
+                    await send_choose_message(your_id,
+                                              f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
+                                              user['id'])
                 else:
                     await send_message(your_id, f'людей нет')
             except Exception as E:
@@ -179,8 +182,9 @@ async def check_and_send(your_id: int, event):
         else:
             await send_start_message(your_id, f"что делаем?")
 
+
 # редактирование сообщений
-def edit_mess(label,event):
+def edit_mess(label, event):
     mess = vk.messages.getByConversationMessageId(
         peer_id=event.obj.peer_id,
         conversation_message_ids=event.obj.conversation_message_id,
@@ -191,12 +195,21 @@ def edit_mess(label,event):
         conversation_message_id=event.obj.conversation_message_id,
         keyboard=None)
 
+
+def clean_global_param(event):
+    if user_profile[event.object.user_id].get('candidate'):
+        user_profile[event.object.user_id]['candidate'].clear()
+    if user_iterators.get(event.object.user_id):
+        del user_iterators[event.object.user_id]
+
+
 async def main():
     for event in longpoll.listen():
         # обрабатываем новые сообщения
-
         if event.type == VkBotEventType.MESSAGE_NEW:
             your_id = event.obj.message['from_id']
+            # если у пользователя есть запись в словаре, то чекаем др и пол и обрабатываем сообщения,
+            # иначе пробуем прописать в словарь данные
             if user_profile.get(your_id):
                 await check_and_send(your_id, event)
             else:
@@ -205,32 +218,26 @@ async def main():
                     await send_message(your_id, check_user['message'])
                 else:
                     await check_and_send(your_id, event)
-            # проверяем есть ли у пользователя др и пол
-
         # обрабатываем новые события(кнопки)
         elif event.type == VkBotEventType.MESSAGE_EVENT:  # Обработка колбеков
-
             payload = event.object.payload.get('button')
             label = event.object.payload.get('label')
             button_id = event.object.payload.get(event.object.user_id)
-
             match payload:
-                case 'dislike'|'like':
-                    edit_mess(label, event)
+                case 'dislike' | 'like':
                     try:
+                        edit_mess(label, event)
                         user = next(user_iterators[event.object.user_id])
                         await send_choose_message(event.object.user_id,
                                                   f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
                                                   user['id'])
                     except:
-                        user_profile[event.object.user_id].clear()  # очищаем кандидатов и итератор
-                        if user_iterators.get(event.object.user_id):
-                            del user_iterators[event.object.user_id]
+                        clean_global_param(event)
                         await send_message(event.object.user_id, 'люди закончились')
                 case ('next' | 'search'):
-                    edit_mess(label,event)
                     # Получаем следующего пользователя для текущего пользователя
                     try:
+                        edit_mess(label, event)
                         if user_iterators.get(event.object.user_id):
                             user = next(user_iterators[event.object.user_id])
                             await send_choose_message(event.object.user_id,
@@ -239,10 +246,9 @@ async def main():
                         else:
                             await send_message(event.object.user_id, 'в вашем профиле нет города, выберите город')
                     except:
-                        user_profile[event.object.user_id].clear()  # очищаем кандидатов и итератор
-                        if user_iterators.get(event.object.user_id):
-                            del user_iterators[event.object.user_id]
-                        await send_message(event.object.user_id, 'люди закончились')
+                        clean_global_param(event)
+                        await send_message(event.object.user_id, ' люди закончились')
                 case 'geo':
                     edit_mess(label, event)
+                    clean_global_param(event)
                     await geo_user(event.object.user_id, f"Ваше местоположение")
