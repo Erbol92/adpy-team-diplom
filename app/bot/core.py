@@ -3,8 +3,11 @@ from config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
-from .any_method import params
+from .any_method import params, map_sex
 from .iterator import UserIterator
+
+# from app.database.models import User, UserCandidate, Candidate
+# from app.database.engine import session_factory
 
 # Инициализация сессии
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -12,7 +15,7 @@ user_session = vk_api.VkApi(token=USER_TOKEN)
 vk = vk_session.get_api()
 longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 
-user_candidate = {}
+user_profile = {}
 user_iterators = {}
 
 
@@ -20,11 +23,13 @@ user_iterators = {}
 
 # стартовое сообщение
 async def send_start_message(user_id, message):
-    keyboard = VkKeyboard(one_time=True)
+    keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('🧲 поиск', color=VkKeyboardColor.NEGATIVE, payload={
-        "button": "search"})
+        "button": "search",
+        "label":"🧲 поиск",})
     keyboard.add_callback_button('🌏 указать место', color=VkKeyboardColor.POSITIVE, payload={
-        "button": "geo"})
+        "button": "geo",
+        "label":"🌏 указать место",})
     param = params(user_id, message, keyboard)
     try:
         vk.messages.send(**param)
@@ -51,13 +56,14 @@ def get_photos(user_id: int):
 
 # отправка сообщений с кнопкой навигации
 async def send_choose_message(user_id: int, message: str, candidate_id: int):
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('💔', color=VkKeyboardColor.NEGATIVE, payload={
-        "button": "dislike", "id": candidate_id})
+        "button": "dislike", "id": candidate_id,"label": '💔'})
     keyboard.add_callback_button('❤', color=VkKeyboardColor.POSITIVE, payload={
-        "button": "like", "id": candidate_id})
+        "button": "like", "id": candidate_id,"label": '❤'})
+    keyboard.add_line()
     keyboard.add_callback_button('следующий(ая)', color=VkKeyboardColor.PRIMARY,
-                                 payload={"button": "next", "id": candidate_id})
+                                 payload={"button": "next", "id": candidate_id,"label": '👉'})
     param = params(user_id, message, keyboard, get_photos(candidate_id))
     try:
         vk.messages.send(**param)
@@ -79,7 +85,7 @@ async def send_message(user_id, message):
 
 
 async def geo_user(user_id, message):
-    keyboard = VkKeyboard(one_time=True)
+    keyboard = VkKeyboard(inline=True)
     keyboard.add_location_button()
     param = params(user_id, message, keyboard)
     try:
@@ -105,12 +111,10 @@ async def user_data(user_id: int):
                 bdate = None
         else:
             bdate = None
-        # меняем пол на противоположный
-        match sex:
-            case 1:
-                sex = 2
-            case 2:
-                sex = 1
+        user_profile[user_id] = {}
+        user_profile[user_id]['sex'] = sex
+        user_profile[user_id]['bdate'] = bdate
+        user_profile[user_id]['city'] = city
         if bdate and sex:
             return bdate, sex, city
         return {'message': 'заполните в профиле поле ' + 'возраст ' if not bdate else '' + 'пол' if not sex else ''}
@@ -121,6 +125,12 @@ async def user_data(user_id: int):
 # поиск пользователей
 async def search_users(city: str, sex: int, bdate: int):
     try:
+        # меняем пол на противоположный
+        match sex:
+            case 1:
+                sex = 2
+            case 2:
+                sex = 1
         param = {'user_ids': id, 'sex': sex,
                  'birth_year': bdate, 'hometown': city, 'count': 5}
         response = user_session.method('users.search', param)
@@ -134,24 +144,52 @@ async def search_users(city: str, sex: int, bdate: int):
 
 # поиск в зависимости от того передан параметр город или нет
 async def search(user_id: int, home_town: str = None):
-    result = await user_data(user_id)
-    if not isinstance(result, dict):
-        bdate, sex, city = result
-        # если home_town передан, заменяем город
-        if home_town:
-            city = home_town
-        # если и то и то None
-        if not city:
-            text = 'неизвестно в каком городе искать'
-            return text
-        text = await search_users(city, sex, bdate)
-        user_candidate[user_id] = text
-        # Создаем итератор для текущего пользователя
-        user_iterators[user_id] = UserIterator(user_candidate[user_id])
-    else:
-        text = result['message']
+    bdate = user_profile[user_id]['bdate']
+    sex = user_profile[user_id]['sex']
+    # если home_town передан, заменяем город
+    city = home_town if home_town else user_profile[user_id].get('city')
+    # если и то и то None
+    if not city:
+        text = 'неизвестно в каком городе искать'
+        return text
+    text = await search_users(city, sex, bdate)
+    user_profile[user_id]['candidate'] = text
+    # Создаем итератор для текущего пользователя
+    user_iterators[user_id] = UserIterator(user_profile[user_id]['candidate'])
     return text
 
+
+async def check_and_send(your_id: int, event):
+    sex = user_profile[your_id].get('sex')
+    bdate = user_profile[your_id].get('bdate')
+    if sex and bdate:
+        # если ответ геолокация
+        if event.obj.message.get('geo'):
+            city = event.obj.message.get('geo')['place']['city']
+            if not user_profile[your_id].get('candidate'):
+                await search(your_id, city)
+            try:
+                if user_profile[your_id].get('candidate'):
+                    user = next(user_iterators[your_id])
+                    await send_choose_message(your_id, f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}", user['id'])
+                else:
+                    await send_message(your_id, f'людей нет')
+            except Exception as E:
+                await send_message(your_id, f'люди закончились {E}')
+        else:
+            await send_start_message(your_id, f"что делаем?")
+
+# редактирование сообщений
+def edit_mess(label,event):
+    mess = vk.messages.getByConversationMessageId(
+        peer_id=event.obj.peer_id,
+        conversation_message_ids=event.obj.conversation_message_id,
+    )['items'][0]
+    vk.messages.edit(
+        peer_id=event.obj.peer_id,
+        message=f"{mess['text']}  {label}",
+        conversation_message_id=event.obj.conversation_message_id,
+        keyboard=None)
 
 async def main():
     for event in longpoll.listen():
@@ -159,48 +197,52 @@ async def main():
 
         if event.type == VkBotEventType.MESSAGE_NEW:
             your_id = event.obj.message['from_id']
-            check_user = await user_data(your_id)
-            # проверяем есть ли у пользователя др и пол
-            if not isinstance(check_user, dict):
-                bdate, sex, city = check_user
-                if bdate and sex:
-                    # если ответ геолокация
-                    if event.obj.message.get('geo'):
-                        city = event.obj.message.get('geo')['place']['city']
-                        if not user_candidate.get(your_id):
-                            await search(your_id, city)
-                        try:
-                            user = next(user_iterators[your_id])
-                            await send_choose_message(your_id, f"{user['first_name']} {user['last_name']}", user['id'])
-                        except Exception as E:
-                            await send_message(your_id, f'люди закончились {E}')
-
-                    else:
-                        await send_start_message(your_id, f"что делаем?")
+            if user_profile.get(your_id):
+                await check_and_send(your_id, event)
             else:
-                await send_message(your_id, check_user['message'])
+                check_user = await user_data(your_id)
+                if isinstance(check_user, dict):
+                    await send_message(your_id, check_user['message'])
+                else:
+                    await check_and_send(your_id, event)
+            # проверяем есть ли у пользователя др и пол
 
         # обрабатываем новые события(кнопки)
         elif event.type == VkBotEventType.MESSAGE_EVENT:  # Обработка колбеков
+
             payload = event.object.payload.get('button')
+            label = event.object.payload.get('label')
             button_id = event.object.payload.get(event.object.user_id)
+
             match payload:
-                case 'dislike':
-                    await send_message(event.object.user_id, f"Вы нажали 💔 {button_id}")
-                case 'like':
-                    await send_message(event.object.user_id, f"Вы нажали ❤ {button_id}")
-                case ('next' | 'search'):
-                    # Получаем следующего пользователя для текущего пользователя
-                    if not user_candidate.get(event.object.user_id):
-                        await search(event.object.user_id)
+                case 'dislike'|'like':
+                    edit_mess(label, event)
                     try:
                         user = next(user_iterators[event.object.user_id])
                         await send_choose_message(event.object.user_id,
                                                   f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
                                                   user['id'])
                     except:
-                        user_candidate[event.object.user_id].clear()  # очищаем кандидатов и итератор
-                        del user_iterators[event.object.user_id]
+                        user_profile[event.object.user_id].clear()  # очищаем кандидатов и итератор
+                        if user_iterators.get(event.object.user_id):
+                            del user_iterators[event.object.user_id]
+                        await send_message(event.object.user_id, 'люди закончились')
+                case ('next' | 'search'):
+                    edit_mess(label,event)
+                    # Получаем следующего пользователя для текущего пользователя
+                    try:
+                        if user_iterators.get(event.object.user_id):
+                            user = next(user_iterators[event.object.user_id])
+                            await send_choose_message(event.object.user_id,
+                                                      f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
+                                                      user['id'])
+                        else:
+                            await send_message(event.object.user_id, 'в вашем профиле нет города, выберите город')
+                    except:
+                        user_profile[event.object.user_id].clear()  # очищаем кандидатов и итератор
+                        if user_iterators.get(event.object.user_id):
+                            del user_iterators[event.object.user_id]
                         await send_message(event.object.user_id, 'люди закончились')
                 case 'geo':
+                    edit_mess(label, event)
                     await geo_user(event.object.user_id, f"Ваше местоположение")

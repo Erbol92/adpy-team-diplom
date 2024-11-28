@@ -1,4 +1,5 @@
 from vk_api.utils import get_random_id
+
 def params(user_id: int, message: str, keyboard=None, attachments=None) -> dict:
     data = {
         'user_id': user_id,
@@ -8,6 +9,13 @@ def params(user_id: int, message: str, keyboard=None, attachments=None) -> dict:
         'attachment': ','.join(attachments) if attachments else None
     }
     return data
+
+def map_sex(sex:int):
+    match sex:
+        case 1:
+            return 'man'
+        case 2:
+            return 'female'
 
 
 # поиск пользователей в сообществе
