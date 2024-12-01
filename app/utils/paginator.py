@@ -2,7 +2,6 @@
 import math
 
 
-# Простой пагинатор
 class Paginator:
     """Простой пагинатор"""
     def __init__(self, array: list | tuple, page: int=0, per_page: int=1):
