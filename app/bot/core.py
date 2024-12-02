@@ -1,19 +1,12 @@
 """Методы для работы с vk_api"""
 
 import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.bot_longpoll import VkBotLongPoll
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from app.config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from .any_method import params
 from .iterator import UserIterator
-from app.database.orm_query import (orm_check_user_in_database,
-                                orm_add_user,
-                                orm_add_all_candidate,
-                                orm_set_user_searched,
-                                orm_check_user_searched,
-                                orm_get_user_id, orm_get_all_candidate)
-from app.utils.paginator import Paginator
 
 
 # Инициализация сессии
@@ -227,104 +220,3 @@ def clean_global_param(event):
         user_profile[event.object.user_id]['candidate'].clear()
     if user_iterators.get(event.object.user_id):
         del user_iterators[event.object.user_id]
-
-
-candidate_paginator = None
-city, sex, bdate = '', 0, ''
-
-
-async def main():
-    global candidate_paginator, city, sex, bdate
-    for event in longpoll.listen():
-        if event.type == VkBotEventType.MESSAGE_NEW:
-            user_vk_id = event.obj.message['from_id']
-            city, sex, bdate = await user_data(user_vk_id)
-
-            if not await orm_check_user_in_database(user_vk_id):
-                await orm_add_user(user_vk_id)
-
-            searched = await orm_check_user_searched(user_vk_id)
-
-            if searched:
-                uid = await orm_get_user_id(user_vk_id)
-                candidates = await orm_get_all_candidate(uid)
-                candidate_paginator = Paginator(candidates)
-
-                user = candidate_paginator.get_next()
-                first_name, last_name = await search_candidate(user)
-                await send_choose_message(
-                    user_vk_id,
-                    f"{first_name} {last_name}\nhttps://vk.com/id{user}",
-                    user, candidate_paginator.has_previous(), candidate_paginator.has_next()
-                )
-            else:
-                if event.obj.message.get('geo'):
-                    city = event.obj.message.get('geo')['place']['city']
-                    candidate_list = await search_users(city, sex, bdate)
-                    uid = await orm_get_user_id(user_vk_id)
-
-                    await orm_add_all_candidate(candidate_list, uid)
-
-                    candidates = await orm_get_all_candidate(uid)
-                    candidate_paginator = Paginator(candidates)
-                    user = candidate_paginator.get_next()
-
-                    first_name, last_name = await search_candidate(user)
-
-                    await send_choose_message(
-                        user_vk_id,
-                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
-                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
-                    )
-                    await orm_set_user_searched(user_vk_id)
-                else:
-                    await send_start_message(user_vk_id, 'Что делаем?')
-
-        elif event.type == VkBotEventType.MESSAGE_EVENT:
-            payload = event.object.payload.get('button')
-
-            button_id = event.object.payload.get(event.object.user_id)
-            #city, sex, bdate = await get_user_data(event.object.user_id)
-
-            match payload:
-                case 'geo':
-                    await geo_user(event.object.user_id, f"Ваше местоположение")
-                case 'search':
-                    candidate_list = await search_users(city, sex, bdate)
-                    uid = await orm_get_user_id(event.object.user_id)
-                    await orm_add_all_candidate(candidate_list, uid)
-
-                    candidates = await orm_get_all_candidate(uid)
-                    candidate_paginator = Paginator(candidates)
-
-                    user = candidate_paginator.get_next()
-                    first_name, last_name = await search_candidate(user)
-
-                    await send_choose_message(
-                        event.object.user_id,
-                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
-                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
-                    )
-                    await orm_set_user_searched(event.object.user_id)
-                case 'next':
-                    user = candidate_paginator.get_next()
-                    first_name, last_name = await search_candidate(user)
-
-                    await send_choose_message(
-                        event.object.user_id,
-                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
-                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
-                    )
-                case 'previous':
-                    user = candidate_paginator.get_previous()
-                    first_name, last_name = await search_candidate(user)
-
-                    await send_choose_message(
-                        event.object.user_id,
-                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
-                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
-                    )
-                case 'like':
-                    await send_message(event.object.user_id, f"Вы нажали ❤ {button_id}")
-                case 'dislike':
-                    await send_message(event.object.user_id, f"Вы нажали 💔 {button_id}")
