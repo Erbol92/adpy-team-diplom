@@ -7,7 +7,7 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from app.config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from .any_method import params
 from .iterator import UserIterator
-
+from app.database.orm_query import orm_get_all_candidate, orm_get_user_id
 
 # Инициализация сессии
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -18,11 +18,10 @@ longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 user_profile = {}
 user_iterators = {}
 
-
 # Функции для отправки сообщения
 
 # стартовое сообщение
-async def send_start_message(user_id, message):
+async def send_start_message(user_id: int, message: str):
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('🧲 поиск', color=VkKeyboardColor.NEGATIVE, payload={
         "button": "search",
@@ -30,6 +29,13 @@ async def send_start_message(user_id, message):
     keyboard.add_callback_button('🌏 указать место', color=VkKeyboardColor.POSITIVE, payload={
         "button": "geo",
         "label": "🌏 указать место", })
+    uid = await orm_get_user_id(user_id)
+    all_candidates = await orm_get_all_candidate(uid)
+    if all_candidates:
+        keyboard.add_line()
+        keyboard.add_callback_button('продолжить', color=VkKeyboardColor.PRIMARY, payload={
+            "button": "continue",
+            "label": "continue", })
     param = params(user_id, message, keyboard)
     try:
         vk.messages.send(**param)
@@ -78,6 +84,11 @@ async def send_choose_message(user_id: int, message: str, candidate_id: int, has
         color=VkKeyboardColor.PRIMARY,
         payload={"button": "next", "id": candidate_id, "label": '👉'})
 
+    keyboard.add_line()
+    keyboard.add_callback_button(
+        'сброс',
+        color=VkKeyboardColor.PRIMARY,
+        payload={"button": "reset", "label": 'reset'})
     param = params(user_id, message, keyboard, get_photos(candidate_id))
     try:
         vk.messages.send(**param)
@@ -86,7 +97,6 @@ async def send_choose_message(user_id: int, message: str, candidate_id: int, has
 
 
 # отправка текстового сообщения
-
 async def send_message(user_id, message):
     param = params(user_id, message)
     try:
@@ -96,8 +106,6 @@ async def send_message(user_id, message):
 
 
 # отправка сообщения с кнопкой навигации
-
-
 async def geo_user(user_id, message):
     keyboard = VkKeyboard(inline=True)
     keyboard.add_location_button()

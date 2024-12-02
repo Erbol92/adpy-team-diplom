@@ -2,7 +2,7 @@ import asyncio
 
 from vk_api.bot_longpoll import VkBotEventType
 
-from app.bot.core import longpoll, send_start_message, geo_user, send_message
+from app.bot.core import longpoll, send_start_message, geo_user
 from app.database.orm_query import orm_check_user_in_database, orm_add_user
 from app.database.orm_query import orm_check_user_searched, orm_set_user_searched
 from app.utils.menu_processing import MenuProcessing
@@ -36,7 +36,7 @@ async def main():
                     menu.set_paginator()
                     await menu.next_candidate()
 
-                    await orm_set_user_searched(user_vk_id)
+                    await orm_set_user_searched(user_vk_id, True)
                 else:
                     await send_start_message(user_vk_id, 'Что делаем?')
 
@@ -52,19 +52,31 @@ async def main():
                     await menu.set_pages()
                     menu.set_paginator()
                     await menu.next_candidate()
-                    await orm_set_user_searched(event.object.user_id)
+                    await orm_set_user_searched(event.object.user_id, True)
                 case 'next':
                     await menu.next_candidate()
                 case 'previous':
                     await menu.previous_candidate()
                 case 'like':
                     await menu.added_candidate_to_favorite()
-                    await send_message(event.object.user_id, f"Пользователь добавлен в избранное")
                 case 'dislike':
                     await menu.added_candidate_to_blacklist()
-                    await send_message(event.object.user_id, f"Пользователь теперь в чёрном списке")
+                case 'reset':
+                    await menu.drop_pages()
+                    await orm_set_user_searched(event.object.user_id, False)
+                    await send_start_message(event.object.user_id, 'Что делаем?')
+                case 'continue':
+                    await menu.set_pages()
+                    menu.set_paginator()
+                    await menu.next_candidate()
+                    await orm_set_user_searched(event.object.user_id, True)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        # asyncio.run(main_db())
+        asyncio.run(main())
+    except Exception as e:
+        print(e)
+
 
