@@ -1,13 +1,20 @@
+"""Методы для работы с vk_api"""
+
 import vk_api
-from config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
+from app.config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from .any_method import params
 from .iterator import UserIterator
+from app.database.orm_query import (orm_check_user_in_database,
+                                orm_add_user,
+                                orm_add_all_candidate,
+                                orm_set_user_searched,
+                                orm_check_user_searched,
+                                orm_get_user_id, orm_get_all_candidate)
+from app.utils.paginator import Paginator
 
-# from app.database.models import User, UserCandidate, Candidate
-# from app.database.engine import session_factory
 
 # Инициализация сессии
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -55,15 +62,29 @@ def get_photos(user_id: int):
 
 
 # отправка сообщений с кнопкой навигации
-async def send_choose_message(user_id: int, message: str, candidate_id: int):
+async def send_choose_message(user_id: int, message: str, candidate_id: int, has_previous: bool, has_next: bool):
     keyboard = VkKeyboard(inline=True)
-    keyboard.add_callback_button('💔', color=VkKeyboardColor.NEGATIVE, payload={
-        "button": "dislike", "id": candidate_id, "label": '💔'})
-    keyboard.add_callback_button('❤', color=VkKeyboardColor.POSITIVE, payload={
-        "button": "like", "id": candidate_id, "label": '❤'})
+    keyboard.add_callback_button(
+        '💔',
+        color=VkKeyboardColor.NEGATIVE,
+        payload={"button": "dislike", "id": candidate_id, "label": '💔'})
+    keyboard.add_callback_button(
+        '❤',
+        color=VkKeyboardColor.POSITIVE,
+        payload={"button": "like", "id": candidate_id, "label": '❤'})
     keyboard.add_line()
-    keyboard.add_callback_button('следующий(ая)', color=VkKeyboardColor.PRIMARY,
-                                 payload={"button": "next", "id": candidate_id, "label": '👉'})
+
+    if has_previous:
+        keyboard.add_callback_button(
+        'предыдущий(ая)',
+        color=VkKeyboardColor.PRIMARY,
+        payload={"button": "previous", "id": candidate_id, "label": '👈'})
+    if has_next:
+        keyboard.add_callback_button(
+        'следующий(ая)',
+        color=VkKeyboardColor.PRIMARY,
+        payload={"button": "next", "id": candidate_id, "label": '👉'})
+
     param = params(user_id, message, keyboard, get_photos(candidate_id))
     try:
         vk.messages.send(**param)
@@ -99,10 +120,11 @@ async def user_data(user_id: int):
     try:
         param = {'user_ids': user_id, 'fields': 'sex,bdate,home_town'}
         response = vk_session.method('users.get', param)
-        response = response[0]
-        bdate = response.get('bdate')
-        sex = response.get('sex')
-        city = response.get('home_town')
+
+        city = response[0].get('home_town')
+        sex = response[0].get('sex')
+        bdate = response[0].get('bdate')
+
         # проверяем если ли др, если есть смотрим длину (может быть указан день или день/месяц
         if bdate:
             if len(bdate.split('.')) == 3:
@@ -111,15 +133,21 @@ async def user_data(user_id: int):
                 bdate = None
         else:
             bdate = None
-        user_profile[user_id] = {}
-        user_profile[user_id]['sex'] = sex
-        user_profile[user_id]['bdate'] = bdate
-        user_profile[user_id]['city'] = city
+
         if bdate and sex:
-            return bdate, sex, city
+            return city, sex, bdate
         return {'message': 'заполните в профиле поле ' + 'возраст ' if not bdate else '' + 'пол' if not sex else ''}
     except Exception as E:
         return {'message': f'ошибка {E}'}
+
+
+async def search_candidate(vk_id: int):
+    param = {'user_ids': vk_id}
+    response = vk_session.method('users.get', param)
+
+    first_name = response[0]['first_name']
+    last_name = response[0]['last_name']
+    return first_name, last_name
 
 
 # поиск пользователей
@@ -131,12 +159,10 @@ async def search_users(city: str, sex: int, bdate: int):
                 sex = 2
             case 2:
                 sex = 1
-        param = {'user_ids': id, 'sex': sex,
-                 'birth_year': bdate, 'hometown': city, 'count': 5}
+
+        param = {'sex': sex, 'birth_year': bdate, 'hometown': city, 'count': 50}
         response = user_session.method('users.search', param)
-        data = [{'id': user['id'],
-                 'first_name': user['first_name'],
-                 'last_name': user['last_name']} for user in response['items']]
+        data = [user['id'] for user in response['items']]
         return data
     except Exception as E:
         return f'Ошибка запроса: {E}'
@@ -203,52 +229,102 @@ def clean_global_param(event):
         del user_iterators[event.object.user_id]
 
 
+candidate_paginator = None
+city, sex, bdate = '', 0, ''
+
+
 async def main():
+    global candidate_paginator, city, sex, bdate
     for event in longpoll.listen():
-        # обрабатываем новые сообщения
         if event.type == VkBotEventType.MESSAGE_NEW:
-            your_id = event.obj.message['from_id']
-            # если у пользователя есть запись в словаре, то чекаем др и пол и обрабатываем сообщения,
-            # иначе пробуем прописать в словарь данные
-            if user_profile.get(your_id):
-                await check_and_send(your_id, event)
+            user_vk_id = event.obj.message['from_id']
+            city, sex, bdate = await user_data(user_vk_id)
+
+            if not await orm_check_user_in_database(user_vk_id):
+                await orm_add_user(user_vk_id)
+
+            searched = await orm_check_user_searched(user_vk_id)
+
+            if searched:
+                uid = await orm_get_user_id(user_vk_id)
+                candidates = await orm_get_all_candidate(uid)
+                candidate_paginator = Paginator(candidates)
+
+                user = candidate_paginator.get_next()
+                first_name, last_name = await search_candidate(user)
+                await send_choose_message(
+                    user_vk_id,
+                    f"{first_name} {last_name}\nhttps://vk.com/id{user}",
+                    user, candidate_paginator.has_previous(), candidate_paginator.has_next()
+                )
             else:
-                check_user = await user_data(your_id)
-                if isinstance(check_user, dict):
-                    await send_message(your_id, check_user['message'])
+                if event.obj.message.get('geo'):
+                    city = event.obj.message.get('geo')['place']['city']
+                    candidate_list = await search_users(city, sex, bdate)
+                    uid = await orm_get_user_id(user_vk_id)
+
+                    await orm_add_all_candidate(candidate_list, uid)
+
+                    candidates = await orm_get_all_candidate(uid)
+                    candidate_paginator = Paginator(candidates)
+                    user = candidate_paginator.get_next()
+
+                    first_name, last_name = await search_candidate(user)
+
+                    await send_choose_message(
+                        user_vk_id,
+                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
+                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
+                    )
+                    await orm_set_user_searched(user_vk_id)
                 else:
-                    await check_and_send(your_id, event)
-        # обрабатываем новые события(кнопки)
-        elif event.type == VkBotEventType.MESSAGE_EVENT:  # Обработка колбеков
+                    await send_start_message(user_vk_id, 'Что делаем?')
+
+        elif event.type == VkBotEventType.MESSAGE_EVENT:
             payload = event.object.payload.get('button')
-            label = event.object.payload.get('label')
+
             button_id = event.object.payload.get(event.object.user_id)
+            #city, sex, bdate = await get_user_data(event.object.user_id)
+
             match payload:
-                case 'dislike' | 'like':
-                    try:
-                        edit_mess(label, event)
-                        user = next(user_iterators[event.object.user_id])
-                        await send_choose_message(event.object.user_id,
-                                                  f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
-                                                  user['id'])
-                    except:
-                        clean_global_param(event)
-                        await send_message(event.object.user_id, 'люди закончились')
-                case ('next' | 'search'):
-                    # Получаем следующего пользователя для текущего пользователя
-                    try:
-                        edit_mess(label, event)
-                        if user_iterators.get(event.object.user_id):
-                            user = next(user_iterators[event.object.user_id])
-                            await send_choose_message(event.object.user_id,
-                                                      f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
-                                                      user['id'])
-                        else:
-                            await send_message(event.object.user_id, 'в вашем профиле нет города, выберите город')
-                    except:
-                        clean_global_param(event)
-                        await send_message(event.object.user_id, ' люди закончились')
                 case 'geo':
-                    edit_mess(label, event)
-                    clean_global_param(event)
                     await geo_user(event.object.user_id, f"Ваше местоположение")
+                case 'search':
+                    candidate_list = await search_users(city, sex, bdate)
+                    uid = await orm_get_user_id(event.object.user_id)
+                    await orm_add_all_candidate(candidate_list, uid)
+
+                    candidates = await orm_get_all_candidate(uid)
+                    candidate_paginator = Paginator(candidates)
+
+                    user = candidate_paginator.get_next()
+                    first_name, last_name = await search_candidate(user)
+
+                    await send_choose_message(
+                        event.object.user_id,
+                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
+                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
+                    )
+                    await orm_set_user_searched(event.object.user_id)
+                case 'next':
+                    user = candidate_paginator.get_next()
+                    first_name, last_name = await search_candidate(user)
+
+                    await send_choose_message(
+                        event.object.user_id,
+                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
+                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
+                    )
+                case 'previous':
+                    user = candidate_paginator.get_previous()
+                    first_name, last_name = await search_candidate(user)
+
+                    await send_choose_message(
+                        event.object.user_id,
+                        f"{first_name} {last_name}\nhttps://vk.com/id{user}",
+                        user, candidate_paginator.has_previous(), candidate_paginator.has_next()
+                    )
+                case 'like':
+                    await send_message(event.object.user_id, f"Вы нажали ❤ {button_id}")
+                case 'dislike':
+                    await send_message(event.object.user_id, f"Вы нажали 💔 {button_id}")
