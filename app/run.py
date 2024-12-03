@@ -2,7 +2,7 @@ import asyncio
 
 from vk_api.bot_longpoll import VkBotEventType
 
-from app.bot.core import longpoll, send_start_message, geo_user
+from app.bot.core import longpoll, send_start_message, geo_user, confirm_choose
 from app.database.orm_query import orm_check_user_in_database, orm_add_user
 from app.database.orm_query import orm_check_user_searched, orm_set_user_searched
 from app.utils.menu_processing import MenuProcessing
@@ -60,7 +60,8 @@ async def main():
                 case 'like':
                     await menu.added_candidate_to_favorite()
                 case 'dislike':
-                    await menu.added_candidate_to_blacklist()
+                    await confirm_choose(event.object.user_id, 'подтвердите действие')
+
                 case 'reset':
                     await menu.drop_pages()
                     await orm_set_user_searched(event.object.user_id, False)
@@ -70,6 +71,14 @@ async def main():
                     menu.set_paginator()
                     await menu.next_candidate()
                     await orm_set_user_searched(event.object.user_id, True)
+                case 'blacklist':
+                    await menu.get_blacklist()
+                case 'confirm':
+                    await menu.added_candidate_to_blacklist()
+                case 'discard':
+                    await send_start_message(event.object.user_id, 'Что делаем?')
+                case 'favorite':
+                    await menu.get_favorite()
 
 
 if __name__ == '__main__':

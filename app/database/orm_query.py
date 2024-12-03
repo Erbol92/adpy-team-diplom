@@ -220,6 +220,35 @@ async def orm_set_candidate_skip(vk_user_id):
         async with session.begin():
             await session.execute(query)
 
+async def get_user_favorite_candidate(user_id: int):
+    """
+    Возвращает список полей ``favorite.vk_id``
+    :param user_id: Идентификатор пользователя
+    :return:
+    """
+    uid = await orm_get_user_id(user_id)
+    subquery = select(FavoriteCandidate.candidate_id).where(FavoriteCandidate.user_id == uid)
+    query = select(Candidate.vk_id).where(Candidate.candidate_id.in_(subquery))
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(query)
+            return result.scalars().all()
+
+
+async def get_user_blacklist_candidate(user_id: int):
+    """
+    Возвращает список полей ``blacklist.vk_id``
+    :param user_id: Идентификатор пользователя
+    :return:
+    """
+    uid = await orm_get_user_id(user_id)
+    subquery = select(Blacklist.candidate_id).where(Blacklist.user_id == uid)
+    query = select(Candidate.vk_id).where(Candidate.candidate_id.in_(subquery))
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(query)
+            return result.scalars().all()
+
 
 async def main():
     await orm_drop_tables()

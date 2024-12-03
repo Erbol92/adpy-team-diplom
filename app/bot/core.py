@@ -7,7 +7,10 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from app.config import VK_TOKEN, GROUP_ID, USER_TOKEN
 from .any_method import params
 from .iterator import UserIterator
-from app.database.orm_query import orm_get_all_candidate, orm_get_user_id
+from app.database.orm_query import (orm_get_all_candidate,
+                                    orm_get_user_id,
+                                    get_user_favorite_candidate,
+                                    get_user_blacklist_candidate)
 
 # Инициализация сессии
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -19,6 +22,21 @@ user_profile = {}
 user_iterators = {}
 
 # Функции для отправки сообщения
+#
+async def confirm_choose(user_id: int, message: str):
+    keyboard = VkKeyboard(one_time=True,inline=False)
+    keyboard.add_callback_button('подтвердить', color=VkKeyboardColor.POSITIVE, payload={
+        "button": "confirm",
+        "label": "confirm", })
+    keyboard.add_callback_button('отмена', color=VkKeyboardColor.NEGATIVE, payload={
+        "button": "discard",
+        "label": "discard", })
+    param = params(user_id, message, keyboard)
+    try:
+        vk.messages.send(**param)
+    except Exception as e:
+        print(f"Ошибка при отправке сообщения: {e}")
+
 
 # стартовое сообщение
 async def send_start_message(user_id: int, message: str):
@@ -30,12 +48,27 @@ async def send_start_message(user_id: int, message: str):
         "button": "geo",
         "label": "🌏 указать место", })
     uid = await orm_get_user_id(user_id)
-    all_candidates = await orm_get_all_candidate(uid)
-    if all_candidates:
+    all_user_candidates = await orm_get_all_candidate(uid)
+    if all_user_candidates:
         keyboard.add_line()
         keyboard.add_callback_button('продолжить', color=VkKeyboardColor.PRIMARY, payload={
             "button": "continue",
             "label": "continue", })
+
+    user_favorite_candidate = await get_user_favorite_candidate(user_id)
+    user_blacklist_candidate = await get_user_blacklist_candidate(user_id)
+    count = 2 if user_favorite_candidate and user_blacklist_candidate else None
+    if count == 2:
+        keyboard.add_line()
+    if user_favorite_candidate:
+        keyboard.add_callback_button('избранные', color=VkKeyboardColor.PRIMARY, payload={
+            "button": "favorite",
+            "label": "favorite", })
+    if user_blacklist_candidate:
+        keyboard.add_callback_button('черный список', color=VkKeyboardColor.PRIMARY, payload={
+            "button": "blacklist",
+            "label": "blacklist", })
+
     param = params(user_id, message, keyboard)
     try:
         vk.messages.send(**param)
@@ -150,6 +183,11 @@ async def search_candidate(vk_id: int):
     last_name = response[0]['last_name']
     return first_name, last_name
 
+# массовый запрос
+async def search_candidate_bigquery(vk_id: str):
+    param = {'user_ids': vk_id}
+    response = vk_session.method('users.get', param)
+    return response
 
 # поиск пользователей
 async def search_users(city: str, sex: int, bdate: int):
