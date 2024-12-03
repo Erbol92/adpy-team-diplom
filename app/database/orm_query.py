@@ -2,7 +2,7 @@
 
 import asyncio
 
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, update, and_, delete
 
 from app.database.engine import Base, engine, session_factory
 from app.database.models import User, Candidate, FavoriteCandidate, Blacklist
@@ -59,13 +59,13 @@ async def orm_check_user_searched(vk_user_id):
             return result.scalars().all()[0]
 
 
-async def orm_set_user_searched(vk_user_id):
+async def orm_set_user_searched(vk_user_id: int, flag: bool):
     """
-    Устанавливает значение поля ``user.searched`` в True
+    Устанавливает значение поля ``user.searched`` в flag
     :param vk_user_id: Идентификатор пользователя вконтакте
     :return:
     """
-    query = update(User).where(User.vk_id == vk_user_id).values(already_searched=True)
+    query = update(User).where(User.vk_id == vk_user_id).values(already_searched=flag)
     async with session_factory() as session:
         async with session.begin():
             await session.execute(query)
@@ -93,12 +93,15 @@ async def orm_add_all_candidate(vk_id_list: list[int], user_id: int):
     :param user_id: Идентификатор пользователя приложения
     :return:
     """
+    query = select(Candidate.vk_id).where(Candidate.user_id == user_id)
     all_candidate = []
-    for ids in vk_id_list:
-        all_candidate.append(Candidate(vk_id=ids, user_id=user_id))
-
     async with session_factory() as session:
         async with session.begin():
+            check_list = await session.execute(query)
+            existing_ids = check_list.scalars().all()
+            for ids in vk_id_list:
+                if ids not in existing_ids:
+                    all_candidate.append(Candidate(vk_id=ids, user_id=user_id))
             session.add_all(all_candidate)
             await session.commit()
 
@@ -110,13 +113,25 @@ async def orm_add_favorite_candidate(user_id: int, candidate_id: int):
     :param candidate_id: Идентификатор кандидата
     :return:
     """
-    favorite_candidate = FavoriteCandidate(user_id=user_id, candidate_id=candidate_id)
 
     async with session_factory() as session:
         async with session.begin():
-            session.add(favorite_candidate)
-            await session.commit()
-
+            result = await session.execute(
+                select(FavoriteCandidate).where(
+                    FavoriteCandidate.user_id == user_id,
+                    FavoriteCandidate.candidate_id == candidate_id
+                )
+            )
+            favorite_candidate = result.scalars().first()
+            # Если запись не найдена, добавляем нового кандидата
+            if favorite_candidate is None:
+                favorite_candidate = FavoriteCandidate(user_id=user_id, candidate_id=candidate_id)
+                session.add(favorite_candidate)
+                await session.commit()
+                created = True
+            else:
+                created = False
+            return created
 
 async def orm_add_candidate_to_blacklist(user_id: int, candidate_id: int):
     """
@@ -125,12 +140,24 @@ async def orm_add_candidate_to_blacklist(user_id: int, candidate_id: int):
     :param candidate_id: Идентификатор кандидата
     :return:
     """
-    blacklist = Blacklist(user_id=user_id, candidate_id=candidate_id)
 
     async with session_factory() as session:
         async with session.begin():
-            session.add(blacklist)
-            await session.commit()
+            result = await session.execute(
+                select(Blacklist).where(
+                    Blacklist.user_id == user_id,
+                    Blacklist.candidate_id == candidate_id
+                )
+            )
+            blacklist = result.scalars().first()
+            if blacklist is None:
+                blacklist = Blacklist(user_id=user_id, candidate_id=candidate_id)
+                session.add(blacklist)
+                await session.commit()
+                created = True
+            else:
+                created = False
+            return created
 
 
 async def orm_get_all_candidate(user_id: int):
@@ -144,6 +171,29 @@ async def orm_get_all_candidate(user_id: int):
         async with session.begin():
             result = await session.execute(query)
             return result.scalars().all()
+
+
+async def drop_all_candidate(user_id: int):
+    """
+    Очищает список полей ``candidate``
+    :param user_id: Идентификатор пользователя
+    :return:
+    """
+    async with session_factory() as session:
+        async with session.begin():
+            # Получаем идентификаторы кандидатов, которые связаны с FavoriteCandidate или Blacklist
+            subquery = select(Candidate.candidate_id).where(
+                (Candidate.candidate_id.in_(select(FavoriteCandidate.candidate_id))) |
+                (Candidate.candidate_id.in_(select(Blacklist.candidate_id)))
+            )
+
+            # Удаляем кандидатов, которые не находятся в подзапросе
+            query = delete(Candidate).where(Candidate.candidate_id.notin_(subquery))
+            result = await session.execute(query)
+            await session.commit()  # Подтверждаем изменения
+
+            return result.rowcount
+
 
 
 async def orm_get_candidate(vk_id: int):
@@ -169,6 +219,35 @@ async def orm_set_candidate_skip(vk_user_id):
     async with session_factory() as session:
         async with session.begin():
             await session.execute(query)
+
+async def get_user_favorite_candidate(user_id: int):
+    """
+    Возвращает список полей ``favorite.vk_id``
+    :param user_id: Идентификатор пользователя
+    :return:
+    """
+    uid = await orm_get_user_id(user_id)
+    subquery = select(FavoriteCandidate.candidate_id).where(FavoriteCandidate.user_id == uid)
+    query = select(Candidate.vk_id).where(Candidate.candidate_id.in_(subquery))
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(query)
+            return result.scalars().all()
+
+
+async def get_user_blacklist_candidate(user_id: int):
+    """
+    Возвращает список полей ``blacklist.vk_id``
+    :param user_id: Идентификатор пользователя
+    :return:
+    """
+    uid = await orm_get_user_id(user_id)
+    subquery = select(Blacklist.candidate_id).where(Blacklist.user_id == uid)
+    query = select(Candidate.vk_id).where(Candidate.candidate_id.in_(subquery))
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(query)
+            return result.scalars().all()
 
 
 async def main():

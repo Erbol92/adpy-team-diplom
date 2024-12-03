@@ -1,10 +1,11 @@
 """Menu processing"""
 
 from app.utils.paginator import Paginator
-from app.bot.core import send_choose_message, user_data, search_candidate, search_users
-from app.database.orm_query import orm_add_all_candidate, orm_get_user_id, orm_get_all_candidate
+from app.bot.core import send_choose_message, user_data, search_candidate, search_users, send_message, search_candidate_bigquery
+from app.database.orm_query import orm_add_all_candidate, orm_get_user_id, orm_get_all_candidate, drop_all_candidate
 from app.database.orm_query import orm_get_candidate, orm_add_favorite_candidate, orm_add_candidate_to_blacklist
 from app.database.orm_query import orm_set_candidate_skip
+from app.database.orm_query import get_user_favorite_candidate,get_user_blacklist_candidate
 
 
 class MenuProcessing:
@@ -98,7 +99,7 @@ class MenuProcessing:
         first_name, last_name = await search_candidate(candidate)
         await send_choose_message(
             self.user_vk_id,
-            f"{first_name} {last_name}\nhttps://vk.com/id{candidate}",
+            f"{first_name} {last_name}\nhttps://vk.com/id{candidate[0]}",
             candidate, self.paginator.has_previous(), self.paginator.has_next()
         )
 
@@ -108,11 +109,11 @@ class MenuProcessing:
         :return:
         """
         candidate = self.paginator.get_previous()
-        self.__set_current_candidate(candidate)
+        self.__set_current_candidate(candidate[0])
         first_name, last_name = await search_candidate(candidate[0])
         await send_choose_message(
             self.user_vk_id,
-            f"{first_name} {last_name}\nhttps://vk.com/id{candidate}",
+            f"{first_name} {last_name}\nhttps://vk.com/id{candidate[0]}",
             candidate, self.paginator.has_previous(), self.paginator.has_next()
         )
 
@@ -123,7 +124,12 @@ class MenuProcessing:
         """
         user_id = await orm_get_user_id(self.user_vk_id)
         candidate_id = await orm_get_candidate(self.current_candidate)
-        await orm_add_favorite_candidate(user_id, candidate_id)
+        result = await orm_add_favorite_candidate(user_id, candidate_id)
+        if result:
+            await self.next_candidate()
+            await send_message(self.user_vk_id, "Пользователь добавлен в избранное")
+        else:
+            await send_message(self.user_vk_id, "Пользователь уже добавлен")
 
     async def added_candidate_to_blacklist(self):
         """
@@ -133,10 +139,37 @@ class MenuProcessing:
         user_id = await orm_get_user_id(self.user_vk_id)
         candidate_id = await orm_get_candidate(self.current_candidate)
 
-        await orm_set_candidate_skip(candidate_id)
-        await orm_add_candidate_to_blacklist(user_id, candidate_id)
+        await orm_set_candidate_skip(self.current_candidate)
+        result = await orm_add_candidate_to_blacklist(user_id, candidate_id)
+        if result:
+            await send_message(self.user_vk_id, "Пользователь теперь в чёрном списке")
+        else:
+            await send_message(self.user_vk_id, "Пользователь уже в чёрном списке")
 
         if self.current_candidate in self.pages:
             del self.pages[self.pages.index(self.current_candidate)]
 
         await self.next_candidate()
+
+    async def drop_pages(self):
+        """
+        Сбрасывает значение для атрибута ``pages``
+        :return:
+        """
+        user_id = await self.__get_database_user_id()
+        self.pages = await drop_all_candidate(user_id)
+
+    async def get_blacklist(self):
+        blacklist_ids = await get_user_blacklist_candidate(self.user_vk_id)
+        blacklist_ids = [str(ids) for ids in blacklist_ids]
+        blacklist = await search_candidate_bigquery(','.join(blacklist_ids))
+        text=[f"{a['first_name']} {a['last_name']} https://vk.com/id{a['id']}" for a in blacklist]
+        await send_message(self.user_vk_id, '\n\n'.join(text))
+
+    async def get_favorite(self):
+        favorite_ids = await get_user_favorite_candidate(self.user_vk_id)
+        favorite_ids = [str(ids) for ids in favorite_ids]
+        favorite = await search_candidate_bigquery(','.join(favorite_ids))
+        text = [f"{a['first_name']} {a['last_name']} https://vk.com/id{a['id']}" for a in favorite]
+        await send_message(self.user_vk_id, '\n\n'.join(text))
+
