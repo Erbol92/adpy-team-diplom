@@ -24,6 +24,7 @@ async def main():
     for event in longpoll.listen():
         user_vk_id = event.obj.message['from_id'] if event.object.message else event.object.user_id
         if event.type == VkBotEventType.MESSAGE_NEW:
+            print('messagemessagemessagemessagemessagemessagemessagemessagemessagemessage',event.object)
             if not menu.get(user_vk_id):
                 menu[user_vk_id] = MenuProcessing()
                 menu[user_vk_id].set_user_vk_id(user_vk_id)
@@ -32,9 +33,9 @@ async def main():
             if not await orm_check_user_in_database(user_vk_id):
                 await orm_add_user(user_vk_id)
 
-            if await orm_check_user_searched(user_vk_id):
-                await menu[user_vk_id].set_pages()
-                menu[user_vk_id].set_paginator()
+            if await orm_check_user_searched(user_vk_id) and menu[user_vk_id].pages and event.object.message.get('text'):
+                # await menu[user_vk_id].set_pages()
+                # menu[user_vk_id].set_paginator()
                 await menu[user_vk_id].now_candidate()
             else:
                 if event.obj.message.get('geo'):
@@ -51,6 +52,7 @@ async def main():
                     await send_start_message(user_vk_id, 'Что делаем?')
 
         elif event.type == VkBotEventType.MESSAGE_EVENT:
+            print('MESSAGE_EVENTMESSAGE_EVENTMESSAGE_EVENTMESSAGE_EVENTMESSAGE_EVENT', event.object)
             payload = event.object.payload.get('button')
             button_id = event.object.payload.get(user_vk_id)
 
@@ -68,13 +70,14 @@ async def main():
                 case 'previous':
                     await menu[user_vk_id].previous_candidate()
                 case 'like':
-                    await menu[user_vk_id].added_candidate_to_favorite()
+                    text = await menu[user_vk_id].added_candidate_to_favorite()
+                    await sendMessageEventAnswer(event.object.event_id, user_vk_id, event.obj.peer_id, text)
                 case 'dislike':
                     await confirm_choose(user_vk_id, 'подтвердите действие')
-
                 case 'reset':
-                    await menu[user_vk_id].drop_pages()
+                    text = await menu[user_vk_id].drop_pages()
                     await orm_set_user_searched(user_vk_id, False)
+                    await sendMessageEventAnswer(event.object.event_id, user_vk_id, event.obj.peer_id, text)
                     await send_start_message(user_vk_id, 'Что делаем?')
                 case 'continue':
                     await menu[user_vk_id].set_pages()
@@ -84,13 +87,17 @@ async def main():
                 case 'blacklist':
                     await menu[user_vk_id].get_blacklist()
                 case 'confirm':
-                    await menu[user_vk_id].added_candidate_to_blacklist()
+                    text = await menu[user_vk_id].added_candidate_to_blacklist()
+                    await asyncio.sleep(1)
+                    await sendMessageEventAnswer(event.object.event_id, user_vk_id, event.obj.peer_id, text)
                 case 'discard':
                     await send_start_message(user_vk_id, 'Что делаем?')
                 case 'favorite':
                     await menu[user_vk_id].get_favorite()
+            if payload not in ['confirm','reset','like']:
+                await sendMessageEventAnswer(event.object.event_id, user_vk_id, event.obj.peer_id)
             print(event.object)
-            await sendMessageEventAnswer(event.object.event_id, user_vk_id, event.obj.peer_id)
+
         # Сохранение объекта в pikl файл
         with open(FILENAME_MENU, 'wb') as f:
             pickle.dump(menu, f)
