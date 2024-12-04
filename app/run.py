@@ -33,8 +33,8 @@ async def main():
                 await orm_add_user(user_vk_id)
 
             if await orm_check_user_searched(user_vk_id):
-                # await menu[user_vk_id].set_pages()
-                # menu[user_vk_id].set_paginator()
+                await menu[user_vk_id].set_pages()
+                menu[user_vk_id].set_paginator()
                 await menu[user_vk_id].now_candidate()
             else:
                 if event.obj.message.get('geo'):
@@ -89,6 +89,7 @@ async def main():
                     await send_start_message(user_vk_id, 'Что делаем?')
                 case 'favorite':
                     await menu[user_vk_id].get_favorite()
+            print(event.object)
             await sendMessageEventAnswer(event.object.event_id, user_vk_id, event.obj.peer_id)
         # Сохранение объекта в pikl файл
         with open(FILENAME_MENU, 'wb') as f:

@@ -255,7 +255,7 @@ async def get_user_blacklist_candidate(user_id: int):
 
 
 async def main():
-    # await orm_drop_tables()
+    await orm_drop_tables()
     await orm_create_tables()
 
 
