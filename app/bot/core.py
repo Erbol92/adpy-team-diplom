@@ -23,7 +23,7 @@ user_iterators = {}
 
 # Функции для отправки сообщения
 
-async def sendMessageEventAnswer(event_id: int, user_id: int, peer_id: int):
+async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int):
     param = {'event_id': event_id,
              'user_id': user_id,
              'peer_id': peer_id,
@@ -116,18 +116,20 @@ async def send_choose_message(user_id: int, message: str, candidate_id: int, has
         '❤',
         color=VkKeyboardColor.POSITIVE,
         payload={"button": "like", "id": candidate_id, "label": '❤'})
-    keyboard.add_line()
 
-    if has_previous:
-        keyboard.add_callback_button(
-        'предыдущий(ая)',
-        color=VkKeyboardColor.PRIMARY,
-        payload={"button": "previous", "id": candidate_id, "label": '👈'})
-    if has_next:
-        keyboard.add_callback_button(
-        'следующий(ая)',
-        color=VkKeyboardColor.PRIMARY,
-        payload={"button": "next", "id": candidate_id, "label": '👉'})
+
+    if has_previous or has_next:
+        keyboard.add_line()
+        if has_previous:
+            keyboard.add_callback_button(
+            'предыдущий(ая)',
+            color=VkKeyboardColor.PRIMARY,
+            payload={"button": "previous", "id": candidate_id, "label": '👈'})
+        if has_next:
+            keyboard.add_callback_button(
+            'следующий(ая)',
+            color=VkKeyboardColor.PRIMARY,
+            payload={"button": "next", "id": candidate_id, "label": '👉'})
 
     keyboard.add_line()
     keyboard.add_callback_button(
