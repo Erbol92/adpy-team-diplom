@@ -182,13 +182,17 @@ async def drop_all_candidate(user_id: int):
     async with session_factory() as session:
         async with session.begin():
             # Получаем идентификаторы кандидатов, которые связаны с FavoriteCandidate или Blacklist
-            subquery = select(Candidate.candidate_id).where(
+            subquery = select(Candidate.candidate_id).where(and_(
                 (Candidate.candidate_id.in_(select(FavoriteCandidate.candidate_id))) |
                 (Candidate.candidate_id.in_(select(Blacklist.candidate_id)))
+            ),(Candidate.user_id==user_id)
             )
 
             # Удаляем кандидатов, которые не находятся в подзапросе
-            query = delete(Candidate).where(Candidate.candidate_id.notin_(subquery))
+            query = delete(Candidate).where(and_(
+                Candidate.candidate_id.notin_(subquery),
+                Candidate.user_id==user_id
+            ))
             result = await session.execute(query)
             await session.commit()  # Подтверждаем изменения
 
@@ -251,7 +255,7 @@ async def get_user_blacklist_candidate(user_id: int):
 
 
 async def main():
-    await orm_drop_tables()
+    # await orm_drop_tables()
     await orm_create_tables()
 
 

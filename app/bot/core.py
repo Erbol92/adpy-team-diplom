@@ -22,6 +22,18 @@ user_profile = {}
 user_iterators = {}
 
 # Функции для отправки сообщения
+
+async def sendMessageEventAnswer(event_id: int, user_id: int, peer_id: int):
+    param = {'event_id': event_id,
+             'user_id': user_id,
+             'peer_id': peer_id,
+             # 'event_data': json.dumps({"type": "show_snackbar",
+             #                           "text": "text"})
+             }
+    try:
+        vk.messages.sendMessageEventAnswer(**param)
+    except Exception as e:
+        print(f"Ошибка при отправке сообщения: {e}")
 #
 async def confirm_choose(user_id: int, message: str):
     keyboard = VkKeyboard(one_time=True,inline=False)
