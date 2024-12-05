@@ -1,6 +1,7 @@
 """Методы для работы с vk_api"""
 
 import json
+
 import vk_api
 
 from vk_api.bot_longpoll import VkBotLongPoll
@@ -13,20 +14,22 @@ from app.database.orm_query import (orm_get_all_candidate,
                                     get_user_blacklist_candidate)
 from .any_method import params
 
-# Инициализация сессии
+
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 user_session = vk_api.VkApi(token=USER_TOKEN)
 vk = vk_session.get_api()
 longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 
-user_profile = {}
-user_iterators = {}
 
-
-# Функции для отправки сообщения
-
-# Отправляет событие с действием, которое произойдет при нажатии на callback-кнопку.
-async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int, text: str = None):
+async def send_message_event_answer(event_id: str, user_id: int, peer_id: int, text: str = None):
+    """
+    Отправляет событие с действием, которое произойдет при нажатии на callback-кнопку
+    :param event_id: Случайная строка, которая возвращается в событии message_event
+    :param user_id: Идентификатор пользователя
+    :param peer_id: Идентификатор диалога со стороны сообщества
+    :param text: Сообщение, которое будет показано пользователю
+    :return:
+    """
     param = {'event_id': event_id,
              'user_id': user_id,
              'peer_id': peer_id,
@@ -40,8 +43,13 @@ async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int, text
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# подтверждение выбора
 async def confirm_choose(user_id: int, message: str):
+    """
+    Подтверждение удаления
+    :param user_id: Идентификатор пользователя
+    :param message: Сообщение для пользователя
+    :return:
+    """
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('подтвердить', color=VkKeyboardColor.POSITIVE, payload={
         "button": "confirm",
@@ -56,8 +64,13 @@ async def confirm_choose(user_id: int, message: str):
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# стартовое сообщение
 async def send_start_message(user_id: int, message: str):
+    """
+    Стартовое сообщение
+    :param user_id: Идентификатор пользователя
+    :param message: Сообщение для пользователя
+    :return:
+    """
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('🧲 поиск', color=VkKeyboardColor.NEGATIVE, payload={
         "button": "search",
@@ -94,8 +107,12 @@ async def send_start_message(user_id: int, message: str):
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# получение фото
 def get_photos(user_id: int):
+    """
+    Получение фото
+    :param user_id: Идентификатор пользователя
+    :return: Фотографии пользователя
+    """
     data = []
     param = {'owner_id': user_id,
              'album_id': 'profile',
@@ -111,8 +128,16 @@ def get_photos(user_id: int):
     return data
 
 
-# отправка сообщений с кнопкой навигации
 async def send_choose_message(user_id: int, message: str, candidate_id: int, has_previous: bool, has_next: bool):
+    """
+    Отправка сообщения с кнопками для переключения между кандидатами
+    :param user_id: Идентификатор пользователя
+    :param message: Сообщение
+    :param candidate_id: Идентификатор кандидата
+    :param has_previous: Проверка на предыдущего в списке кандидатов
+    :param has_next: Проверка на следующего в списке кандидатов
+    :return:
+    """
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button(
         '💔',
@@ -148,8 +173,13 @@ async def send_choose_message(user_id: int, message: str, candidate_id: int, has
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# отправка текстового сообщения
-async def send_message(user_id, message):
+async def send_message(user_id: int, message: str):
+    """
+    Отправка текстового сообщения
+    :param user_id: Идентификатор пользователя
+    :param message: Сообщение
+    :return:
+    """
     param = params(user_id, message)
     try:
         vk.messages.send(**param)
@@ -157,8 +187,13 @@ async def send_message(user_id, message):
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# отправка сообщения с кнопкой навигации
-async def geo_user(user_id, message):
+async def geo_user(user_id: int, message: str):
+    """
+    Отправка сообщения с кнопкой навигации
+    :param user_id: Идентификатор пользователя
+    :param message: Сообщение
+    :return:
+    """
     keyboard = VkKeyboard(inline=True)
     keyboard.add_location_button()
     param = params(user_id, message, keyboard)
@@ -168,8 +203,12 @@ async def geo_user(user_id, message):
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# полученые данных пользователя (с кем чат)
 async def user_data(user_id: int):
+    """
+    Получение данных пользователя (с кем чат)
+    :param user_id: Идентификатор пользователя
+    :return:
+    """
     try:
         param = {'user_ids': user_id, 'fields': 'sex,bdate,home_town'}
         response = vk_session.method('users.get', param)
@@ -178,7 +217,7 @@ async def user_data(user_id: int):
         sex = response[0].get('sex')
         bdate = response[0].get('bdate')
 
-        # проверяем если ли др, если есть смотрим длину (может быть указан день или день/месяц
+        # проверяем если ли дата рождения, если есть смотрим длину (может быть указан день или день/месяц
         if bdate:
             if len(bdate.split('.')) == 3:
                 bdate = bdate.split('.')[-1]
@@ -195,6 +234,11 @@ async def user_data(user_id: int):
 
 
 async def search_candidate(vk_id: int):
+    """
+    Осуществляет поиск имени и фамилии пользователя
+    :param vk_id: Идентификатор пользователя вконтакте
+    :return:
+    """
     param = {'user_ids': vk_id}
     response = vk_session.method('users.get', param)
 
@@ -205,6 +249,11 @@ async def search_candidate(vk_id: int):
 
 # массовый запрос как search_candidate
 async def search_candidate_bigquery(vk_id: str):
+    """
+    Осуществляет поиск множества данных о пользователе
+    :param vk_id: Идентификатор пользователя вконтакте
+    :return:
+    """
     param = {'user_ids': vk_id}
     response = vk_session.method('users.get', param)
     return response
@@ -212,6 +261,13 @@ async def search_candidate_bigquery(vk_id: str):
 
 # поиск пользователей
 async def search_users(city: str, sex: int, bdate: int):
+    """
+    Поиск подходящих кандидатов по фильтрам
+    :param city: Город для поиска
+    :param sex: Пол для поиска
+    :param bdate: Дата рождения для поиска
+    :return:
+    """
     try:
         # меняем пол на противоположный
         match sex:
@@ -226,16 +282,3 @@ async def search_users(city: str, sex: int, bdate: int):
         return data
     except Exception as E:
         return f'Ошибка запроса: {E}'
-
-
-# редактирование сообщений
-def edit_mess(label, event):
-    mess = vk.messages.getByConversationMessageId(
-        peer_id=event.obj.peer_id,
-        conversation_message_ids=event.obj.conversation_message_id,
-    )['items'][0]
-    vk.messages.edit(
-        peer_id=event.obj.peer_id,
-        message=f"{mess['text']}  {label}",
-        conversation_message_id=event.obj.conversation_message_id,
-        keyboard=None)

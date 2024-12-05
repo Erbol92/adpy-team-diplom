@@ -1,8 +1,6 @@
 """Функции запросов в базу данных"""
 
-import asyncio
-
-from sqlalchemy import select, update, and_, delete
+from sqlalchemy import select, update, and_, delete, inspect
 
 from app.database.engine import Base, engine, session_factory
 from app.database.models import User, Candidate, FavoriteCandidate, Blacklist
@@ -20,7 +18,7 @@ async def orm_create_tables():
         await conn.run_sync(Base.metadata.create_all)
 
 
-async def orm_check_user_in_database(vk_user_id):
+async def orm_check_user_in_database(vk_user_id: int):
     """
     Проверяет наличие пользователя в таблице ``user``
     :param vk_user_id: Идентификатор пользователя вконтакте
@@ -33,7 +31,7 @@ async def orm_check_user_in_database(vk_user_id):
             return result.scalar_one_or_none()
 
 
-async def orm_get_user_id(vk_user_id):
+async def orm_get_user_id(vk_user_id: int):
     """
     Возвращает значение поля ``user.user_id``
     :param vk_user_id: Идентификатор пользователя вконтакте
@@ -46,7 +44,7 @@ async def orm_get_user_id(vk_user_id):
             return result.scalars().all()[0]
 
 
-async def orm_check_user_searched(vk_user_id):
+async def orm_check_user_searched(vk_user_id: int):
     """
     Проверяет значение поля ``user.searched``
     :param vk_user_id: Идентификатор пользователя вконтакте
@@ -61,8 +59,9 @@ async def orm_check_user_searched(vk_user_id):
 
 async def orm_set_user_searched(vk_user_id: int, flag: bool):
     """
-    Устанавливает значение поля ``user.searched`` в flag
+    Устанавливает значение поля ``user.searched`` в значение flag
     :param vk_user_id: Идентификатор пользователя вконтакте
+    :param flag: True или False
     :return:
     """
     query = update(User).where(User.vk_id == vk_user_id).values(already_searched=flag)
@@ -133,6 +132,7 @@ async def orm_add_favorite_candidate(user_id: int, candidate_id: int):
                 created = False
             return created
 
+
 async def orm_add_candidate_to_blacklist(user_id: int, candidate_id: int):
     """
     Добавляет кандидата в чёрный список
@@ -185,19 +185,18 @@ async def drop_all_candidate(user_id: int):
             subquery = select(Candidate.candidate_id).where(and_(
                 (Candidate.candidate_id.in_(select(FavoriteCandidate.candidate_id))) |
                 (Candidate.candidate_id.in_(select(Blacklist.candidate_id)))
-            ),(Candidate.user_id==user_id)
+            ), (Candidate.user_id == user_id)
             )
 
             # Удаляем кандидатов, которые не находятся в подзапросе
             query = delete(Candidate).where(and_(
                 Candidate.candidate_id.notin_(subquery),
-                Candidate.user_id==user_id
+                Candidate.user_id == user_id
             ))
             result = await session.execute(query)
             await session.commit()  # Подтверждаем изменения
 
             return result.rowcount
-
 
 
 async def orm_get_candidate(vk_id: int):
@@ -213,7 +212,7 @@ async def orm_get_candidate(vk_id: int):
             return result.scalars().all()[0]
 
 
-async def orm_set_candidate_skip(vk_user_id):
+async def orm_set_candidate_skip(vk_user_id: int):
     """
     Устанавливает значение поля ``candidate.skip`` в True
     :param vk_user_id: Идентификатор пользователя вконтакте
@@ -223,6 +222,7 @@ async def orm_set_candidate_skip(vk_user_id):
     async with session_factory() as session:
         async with session.begin():
             await session.execute(query)
+
 
 async def get_user_favorite_candidate(user_id: int):
     """
@@ -254,13 +254,56 @@ async def get_user_blacklist_candidate(user_id: int):
             return result.scalars().all()
 
 
-async def main():
-    # await orm_drop_tables()
-    await orm_create_tables()
+async def orm_delete_candidate_from_favorite(user_id: int, candidate_id: int):
+    """
+    Удаляет кандидата из таблицы ``favorite_candidate``
+    :param user_id: Идентификатор пользователя
+    :param candidate_id: Идентификатор кандидата
+    :return:
+    """
+    search_query = select(FavoriteCandidate).where(and_(
+        FavoriteCandidate.candidate_id == candidate_id, FavoriteCandidate.user_id == user_id))
+
+    delete_query = delete(FavoriteCandidate).where(and_(
+        FavoriteCandidate.candidate_id == candidate_id, FavoriteCandidate.user_id == user_id))
+
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(search_query)
+
+            if result.scalars().first():
+                await session.execute(delete_query)
+                await session.commit()
 
 
-if __name__ == '__main__':
-    try:
-        print(asyncio.run(main()))
-    except Exception as e:
-        print(e)
+async def orm_check_table_exists():
+    """
+    Проверяет наличие таблиц в базе данных
+    :return:
+    """
+    async with engine.connect() as conn:
+        tables = await conn.run_sync(
+            lambda sync_conn: inspect(sync_conn).get_table_names()
+        )
+    if User.__tablename__ in tables:
+        return True
+
+    return False
+
+
+async def init_database(dropped: bool = False):
+    """
+    Инициализирует базу данных
+    :param dropped: Должен ли быть выполнен сброс базы данных
+    :return:
+    """
+    table_exists = await orm_check_table_exists()
+
+    if dropped:
+        await orm_drop_tables()
+        await orm_create_tables()
+    else:
+        if not table_exists:
+            await orm_create_tables()
+        else:
+            return

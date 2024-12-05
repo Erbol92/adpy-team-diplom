@@ -5,6 +5,7 @@ from app.bot.core import send_choose_message, user_data, search_candidate, searc
 from app.database.orm_query import get_user_favorite_candidate, get_user_blacklist_candidate
 from app.database.orm_query import orm_add_all_candidate, orm_get_user_id, orm_get_all_candidate, drop_all_candidate
 from app.database.orm_query import orm_get_candidate, orm_add_favorite_candidate, orm_add_candidate_to_blacklist
+from app.database.orm_query import orm_delete_candidate_from_favorite
 from app.database.orm_query import orm_set_candidate_skip
 from app.utils.paginator import Paginator
 
@@ -150,6 +151,8 @@ class MenuProcessing:
         """
         user_id = await orm_get_user_id(self.user_vk_id)
         candidate_id = await orm_get_candidate(self.current_candidate)
+
+        await orm_delete_candidate_from_favorite(user_id, candidate_id)
 
         await orm_set_candidate_skip(self.current_candidate)
         result = await orm_add_candidate_to_blacklist(user_id, candidate_id)
