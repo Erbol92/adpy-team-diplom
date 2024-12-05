@@ -11,7 +11,6 @@ from app.config import DSN
 engine = create_async_engine(DSN, echo=True)
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-# Анотация типов для подстановки в модели таблиц
 int_pk = Annotated[int, mapped_column(primary_key=True)]
 
 
