@@ -1,8 +1,8 @@
 """Методы для работы с vk_api"""
 
 import json
-
 import vk_api
+
 from vk_api.bot_longpoll import VkBotLongPoll
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
@@ -12,7 +12,6 @@ from app.database.orm_query import (orm_get_all_candidate,
                                     get_user_favorite_candidate,
                                     get_user_blacklist_candidate)
 from .any_method import params
-from .iterator import UserIterator
 
 # Инициализация сессии
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -26,6 +25,7 @@ user_iterators = {}
 
 # Функции для отправки сообщения
 
+# Отправляет событие с действием, которое произойдет при нажатии на callback-кнопку.
 async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int, text: str = None):
     param = {'event_id': event_id,
              'user_id': user_id,
@@ -40,7 +40,7 @@ async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int, text
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-#
+# подтверждение выбора
 async def confirm_choose(user_id: int, message: str):
     keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('подтвердить', color=VkKeyboardColor.POSITIVE, payload={
@@ -94,7 +94,7 @@ async def send_start_message(user_id: int, message: str):
         print(f"Ошибка при отправке сообщения: {e}")
 
 
-# получение фоток
+# получение фото
 def get_photos(user_id: int):
     data = []
     param = {'owner_id': user_id,
@@ -203,7 +203,7 @@ async def search_candidate(vk_id: int):
     return first_name, last_name
 
 
-# массовый запрос
+# массовый запрос как search_candidate
 async def search_candidate_bigquery(vk_id: str):
     param = {'user_ids': vk_id}
     response = vk_session.method('users.get', param)
@@ -228,47 +228,6 @@ async def search_users(city: str, sex: int, bdate: int):
         return f'Ошибка запроса: {E}'
 
 
-# поиск в зависимости от того передан параметр город или нет
-async def search(user_id: int, home_town: str = None):
-    bdate = user_profile[user_id]['bdate']
-    sex = user_profile[user_id]['sex']
-    # если home_town передан, заменяем город
-    city = home_town if home_town else user_profile[user_id].get('city')
-    # если и то и то None
-    if not city:
-        text = 'неизвестно в каком городе искать'
-        return text
-    text = await search_users(city, sex, bdate)
-    user_profile[user_id]['candidate'] = text
-    # Создаем итератор для текущего пользователя
-    user_iterators[user_id] = UserIterator(user_profile[user_id]['candidate'])
-    return text
-
-
-# проверяем есть ли у пользователя др и пол
-async def check_and_send(your_id: int, event):
-    sex = user_profile[your_id].get('sex')
-    bdate = user_profile[your_id].get('bdate')
-    if sex and bdate:
-        # если ответ геолокация
-        if event.obj.message.get('geo'):
-            city = event.obj.message.get('geo')['place']['city']
-            if not user_profile[your_id].get('candidate'):
-                await search(your_id, city)
-            try:
-                if user_profile[your_id].get('candidate'):
-                    user = next(user_iterators[your_id])
-                    await send_choose_message(your_id,
-                                              f"{user['first_name']} {user['last_name']}\nhttps://vk.com/id{user['id']}",
-                                              user['id'])
-                else:
-                    await send_message(your_id, f'людей нет')
-            except Exception as E:
-                await send_message(your_id, f'люди закончились {E}')
-        else:
-            await send_start_message(your_id, f"что делаем?")
-
-
 # редактирование сообщений
 def edit_mess(label, event):
     mess = vk.messages.getByConversationMessageId(
@@ -280,10 +239,3 @@ def edit_mess(label, event):
         message=f"{mess['text']}  {label}",
         conversation_message_id=event.obj.conversation_message_id,
         keyboard=None)
-
-
-def clean_global_param(event):
-    if user_profile[event.object.user_id].get('candidate'):
-        user_profile[event.object.user_id]['candidate'].clear()
-    if user_iterators.get(event.object.user_id):
-        del user_iterators[event.object.user_id]
