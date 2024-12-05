@@ -1,16 +1,18 @@
 """Методы для работы с vk_api"""
 
+import json
+
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from app.config import VK_TOKEN, GROUP_ID, USER_TOKEN
-from .any_method import params
-from .iterator import UserIterator
 from app.database.orm_query import (orm_get_all_candidate,
                                     orm_get_user_id,
                                     get_user_favorite_candidate,
                                     get_user_blacklist_candidate)
+from .any_method import params
+from .iterator import UserIterator
 
 # Инициализация сессии
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -21,22 +23,26 @@ longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 user_profile = {}
 user_iterators = {}
 
+
 # Функции для отправки сообщения
 
-async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int):
+async def sendMessageEventAnswer(event_id: str, user_id: int, peer_id: int, text: str = None):
     param = {'event_id': event_id,
              'user_id': user_id,
              'peer_id': peer_id,
-             # 'event_data': json.dumps({"type": "show_snackbar",
-             #                           "text": "text"})
              }
+    if text is not None:
+        event_data = {'event_data': json.dumps({"type": "show_snackbar", "text": text})}
+        param.update(event_data)
     try:
         vk.messages.sendMessageEventAnswer(**param)
     except Exception as e:
         print(f"Ошибка при отправке сообщения: {e}")
+
+
 #
 async def confirm_choose(user_id: int, message: str):
-    keyboard = VkKeyboard(one_time=True,inline=False)
+    keyboard = VkKeyboard(inline=True)
     keyboard.add_callback_button('подтвердить', color=VkKeyboardColor.POSITIVE, payload={
         "button": "confirm",
         "label": "confirm", })
@@ -117,19 +123,18 @@ async def send_choose_message(user_id: int, message: str, candidate_id: int, has
         color=VkKeyboardColor.POSITIVE,
         payload={"button": "like", "id": candidate_id, "label": '❤'})
 
-
     if has_previous or has_next:
         keyboard.add_line()
         if has_previous:
             keyboard.add_callback_button(
-            'предыдущий(ая)',
-            color=VkKeyboardColor.PRIMARY,
-            payload={"button": "previous", "id": candidate_id, "label": '👈'})
+                'предыдущий(ая)',
+                color=VkKeyboardColor.PRIMARY,
+                payload={"button": "previous", "id": candidate_id, "label": '👈'})
         if has_next:
             keyboard.add_callback_button(
-            'следующий(ая)',
-            color=VkKeyboardColor.PRIMARY,
-            payload={"button": "next", "id": candidate_id, "label": '👉'})
+                'следующий(ая)',
+                color=VkKeyboardColor.PRIMARY,
+                payload={"button": "next", "id": candidate_id, "label": '👉'})
 
     keyboard.add_line()
     keyboard.add_callback_button(
@@ -197,11 +202,13 @@ async def search_candidate(vk_id: int):
     last_name = response[0]['last_name']
     return first_name, last_name
 
+
 # массовый запрос
 async def search_candidate_bigquery(vk_id: str):
     param = {'user_ids': vk_id}
     response = vk_session.method('users.get', param)
     return response
+
 
 # поиск пользователей
 async def search_users(city: str, sex: int, bdate: int):

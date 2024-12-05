@@ -1,12 +1,12 @@
 """Menu processing"""
 
-from app.utils.paginator import Paginator
 from app.bot.core import send_choose_message, user_data, search_candidate, search_users, send_message, \
     search_candidate_bigquery, send_start_message
+from app.database.orm_query import get_user_favorite_candidate, get_user_blacklist_candidate
 from app.database.orm_query import orm_add_all_candidate, orm_get_user_id, orm_get_all_candidate, drop_all_candidate
 from app.database.orm_query import orm_get_candidate, orm_add_favorite_candidate, orm_add_candidate_to_blacklist
 from app.database.orm_query import orm_set_candidate_skip
-from app.database.orm_query import get_user_favorite_candidate, get_user_blacklist_candidate
+from app.utils.paginator import Paginator
 
 
 class MenuProcessing:
@@ -107,7 +107,6 @@ class MenuProcessing:
 
     async def now_candidate(self):
         candidate = self.paginator.get_page()
-        # await self.set_pages()
         self.__set_current_candidate(candidate[0])
         first_name, last_name = await search_candidate(candidate)
         await send_choose_message(
@@ -140,9 +139,11 @@ class MenuProcessing:
         result = await orm_add_favorite_candidate(user_id, candidate_id)
         if result:
             await self.next_candidate()
-            await send_message(self.user_vk_id, "Пользователь добавлен в избранное")
+            return "Пользователь добавлен в избранное"
+            # await send_message(self.user_vk_id, "Пользователь добавлен в избранное")
         else:
-            await send_message(self.user_vk_id, "Пользователь уже добавлен")
+            # await send_message(self.user_vk_id, "Пользователь уже добавлен")
+            return "Пользователь уже добавлен"
 
     async def added_candidate_to_blacklist(self):
         """
@@ -155,22 +156,21 @@ class MenuProcessing:
         await orm_set_candidate_skip(self.current_candidate)
         result = await orm_add_candidate_to_blacklist(user_id, candidate_id)
         if result:
-            await send_message(self.user_vk_id, "Пользователь теперь в чёрном списке")
+            # await send_message(self.user_vk_id, "Пользователь теперь в чёрном списке")
+
             if self.current_candidate in self.pages:
                 del self.pages[self.pages.index(self.current_candidate)]
-
-            self.paginator.pages = len(self.pages)
-            if self.paginator.page == self.paginator.pages:
-                self.paginator.page -= 1
+                self.paginator.pages = len(self.pages)
+                self.paginator.page = len(self.pages)
 
             if self.pages:
                 await self.now_candidate()
             else:
                 await send_start_message(self.user_vk_id, 'Что делаем?')
+            return "Пользователь теперь в чёрном списке"
         else:
-            await send_message(self.user_vk_id, "Пользователь уже в чёрном списке")
-
-
+            # await send_message(self.user_vk_id, "Пользователь уже в чёрном списке")
+            return "Пользователь уже в чёрном списке"
 
     async def drop_pages(self):
         """
@@ -179,6 +179,7 @@ class MenuProcessing:
         """
         user_id = await self.__get_database_user_id()
         self.pages = await drop_all_candidate(user_id)
+        return "кандидаты очищены"
 
     async def get_blacklist(self):
         blacklist_ids = await get_user_blacklist_candidate(self.user_vk_id)
