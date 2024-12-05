@@ -2,7 +2,7 @@ import unittest
 from app.utils.menu_processing import MenuProcessing
 from unittest.mock import patch, AsyncMock
 from app.bot.core import send_message
-from app.bot.any_method import params
+
 
 class TestMenuProcessing(unittest.TestCase):
     def setUp(self):

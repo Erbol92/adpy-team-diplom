@@ -140,9 +140,7 @@ class MenuProcessing:
         if result:
             await self.next_candidate()
             return "Пользователь добавлен в избранное"
-            # await send_message(self.user_vk_id, "Пользователь добавлен в избранное")
         else:
-            # await send_message(self.user_vk_id, "Пользователь уже добавлен")
             return "Пользователь уже добавлен"
 
     async def added_candidate_to_blacklist(self):
@@ -156,20 +154,24 @@ class MenuProcessing:
         await orm_set_candidate_skip(self.current_candidate)
         result = await orm_add_candidate_to_blacklist(user_id, candidate_id)
         if result:
-            # await send_message(self.user_vk_id, "Пользователь теперь в чёрном списке")
 
             if self.current_candidate in self.pages:
                 del self.pages[self.pages.index(self.current_candidate)]
                 self.paginator.pages = len(self.pages)
-                self.paginator.page = len(self.pages)
-
+                print(self.paginator.page,self.paginator.pages)
+                if self.paginator.page > len(self.pages):
+                    self.paginator.page = len(self.pages)
+                elif self.paginator.page == 1:
+                    pass
+                else:
+                    self.paginator.page -= 1
+                print(self.paginator.page, self.paginator.pages)
             if self.pages:
                 await self.now_candidate()
             else:
                 await send_start_message(self.user_vk_id, 'Что делаем?')
             return "Пользователь теперь в чёрном списке"
         else:
-            # await send_message(self.user_vk_id, "Пользователь уже в чёрном списке")
             return "Пользователь уже в чёрном списке"
 
     async def drop_pages(self):
